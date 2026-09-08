@@ -1365,7 +1365,7 @@ function starRepo(repo) {
   var x = Promise.resolve([])
 
   function getNext(x, callback) {
-    $Rainb.HTTP("https://api.github.com/" + repo + "/repos?per_page=2000&page=" + x, {}, function(asdf) {
+    $Rainb.HTTP("https://api.github.com/" + repo + "/repos?per_page=100&page=" + x, {}, function(asdf) {
       callback(JSON.parse(asdf.response))
     })
   }
@@ -1374,12 +1374,11 @@ function starRepo(repo) {
     return x.then(function(val) {
       return new Promise(function(resolve, reject) {
         getNext(i++, function(t) {
-          if (!t.length) {
+          if (!t || !t.length) {
             //END
             resolve(val);
           } else {
             //KEEP GOING
-            //resolve(val.concat(t))
             resolve(ahh(Promise.resolve(val.concat(t))))
           }
         })
@@ -1391,17 +1390,15 @@ function starRepo(repo) {
     return new Promise(function(resolve, reject) {
       function next() {
         if (ohh[++i] && ohh[i].html_url) {
-          starForm(ohh[i].html_url, next)
+          // Add a small delay to prevent rate limits
+          setTimeout(function() {
+            starForm(ohh[i].html_url, next);
+          }, 500);
         } else {
           resolve(true)
         }
       }
-      next(); next();
-      next();
-      next();
-      next();
-      next();
-      next();
+      // Execute sequentially to avoid getting rate limited by GitHub
       next();
     })
   })
@@ -1409,25 +1406,46 @@ function starRepo(repo) {
 
 function starForm(repo, next) {
   $Rainb.HTTP(repo, {}, function(lol) {
-    var div = $Rainb.el("div");
-    div.innerHTML = lol.response;
-    var form = Array.prototype.map.call(div.getElementsByClassName("unstarred js-social-form"), function(a) {
-      return [a.action, a.method, new FormData(a)]
-    });
-    if (form.length) {
-      form = form[0]
-      //console.log(form[0])
-      $Rainb.HTTP(form[0], {
-        method: form[1],
-        post: form[2]
+    var doc = new DOMParser().parseFromString(lol.response, "text/html");
+    
+    // Find forms whose action ends with /star (avoids /unstar)
+    var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
+    var starForm = null;
+    
+    for (var i = 0; i < forms.length; i++) {
+      var action = forms[i].getAttribute("action");
+      if (action && action.indexOf("/star") !== -1 && action.indexOf("/unstar") === -1) {
+        starForm = forms[i];
+        break;
+      }
+    }
+    
+    // Fallback to legacy class names just in case
+    if (!starForm) {
+      var legacyForms = doc.getElementsByClassName("unstarred js-social-form");
+      if (legacyForms.length > 0) {
+        starForm = legacyForms[0];
+      }
+    }
+    
+    if (starForm) {
+      var actionUrl = starForm.getAttribute("action") || starForm.action;
+      var method = starForm.getAttribute("method") || "POST";
+      
+      $Rainb.HTTP(new URL(actionUrl, repo).href, {
+        method: method,
+        post: new FormData(starForm)
       }, function(asdf) {
         console.log(repo + " success starred (I think...)")
         next();
       }, {
         accept: "application/json"
-      })
+      });
+    } else {
+      console.log(repo + " already starred or failed to find form");
+      next();
     }
-  })
+  });
 }
 $Rainb.enableDrag();
 $Rainb.add(document.body, $Rainb.el('div', {
