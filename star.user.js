@@ -1339,6 +1339,10 @@ function followUser(user) {
   return new Promise(function(resolve, reject) {
     var profileUrl = "https://github.com/" + user;
     $Rainb.HTTP(profileUrl, {}, function(lol) {
+      if (!isSuccessfulResponse(lol)) {
+        console.error("Failed to load profile for " + user + ". HTTP " + lol.status);
+        return resolve(false);
+      }
       var doc = new DOMParser().parseFromString(lol.response, "text/html");
       
       var isFollowing = lol.response.indexOf('action="/users/unfollow"') !== -1 || lol.response.indexOf('"viewerIsFollowing":true') !== -1;
@@ -1349,7 +1353,7 @@ function followUser(user) {
       
       var followForm = null;
       var csrfToken = null;
-      var postUrl = "/users/follow?target=" + user;
+      var postUrl = null;
       
       var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
       for (var i = 0; i < forms.length; i++) {
@@ -1361,7 +1365,7 @@ function followUser(user) {
       }
       
       if (!followForm) {
-        var scripts = doc.querySelectorAll('script[type="application/json"]');
+        var scripts = Array.prototype.slice.call(doc.querySelectorAll('script[type="application/json"]'));
         for (var s = 0; s < scripts.length; s++) {
           try {
             var data = JSON.parse(scripts[s].textContent);
@@ -1382,7 +1386,10 @@ function followUser(user) {
       
       if (!followForm && !csrfToken) {
          var anyTokenInput = doc.querySelector('input[name="authenticity_token"]');
-         if (anyTokenInput) csrfToken = anyTokenInput.value;
+         if (anyTokenInput) {
+             csrfToken = anyTokenInput.value;
+             postUrl = "/users/follow?target=" + user;
+         }
       }
       
       if (followForm) {
@@ -1390,9 +1397,14 @@ function followUser(user) {
         $Rainb.HTTP(new URL(actionUrl, profileUrl).href, {
           method: followForm.getAttribute("method") || "POST",
           post: new FormData(followForm)
-        }, function() {
-          console.log(user + " success follow (form)");
-          resolve(true);
+        }, function(res) {
+          if (isSuccessfulResponse(res)) {
+            console.log(user + " success follow (form)");
+            resolve(true);
+          } else {
+            console.error(user + " failed to follow (form). HTTP " + res.status);
+            resolve(false);
+          }
         }, { accept: "application/json" });
       } else if (csrfToken) {
         var fd = new FormData();
@@ -1400,9 +1412,14 @@ function followUser(user) {
         $Rainb.HTTP(new URL(postUrl, profileUrl).href, {
           method: "POST",
           post: fd
-        }, function() {
-          console.log(user + " success follow (token)");
-          resolve(true);
+        }, function(res) {
+          if (isSuccessfulResponse(res)) {
+            console.log(user + " success follow (token)");
+            resolve(true);
+          } else {
+            console.error(user + " failed to follow (token). HTTP " + res.status);
+            resolve(false);
+          }
         }, { accept: "application/json" });
       } else {
         console.log("%cHello " + user + "! You cannot follow yourself you noob", "color:blue");
@@ -1414,31 +1431,42 @@ function followUser(user) {
 
 function starRepo(repo) {
   return new Promise(function(resolve, reject) {
-    function fetchRepos(token) {
+    function fetchRepos(token, hasRetried) {
       var headers = {};
       if (token) headers["Authorization"] = "token " + token;
       
       $Rainb.HTTP("https://api.github.com/" + repo + "/repos?sort=pushed&direction=desc&per_page=50&page=1", {}, function(asdf) {
         if (asdf.status === 403) {
-           var userToken = prompt("You hit the GitHub API rate limit (60 requests/hr).\nTo continue testing, please paste a Personal Access Token here:");
-           if (userToken) {
-             return fetchRepos(userToken.trim());
-           } else {
-             console.error("API Rate limit hit! Wait an hour or provide a token.");
-             return resolve(true);
+           if (!hasRetried) {
+             var userToken = prompt("You hit the GitHub API rate limit (60 requests/hr).\nTo continue testing, please paste a Personal Access Token here:");
+             if (userToken) {
+               return fetchRepos(userToken.trim(), true);
+             }
            }
+           console.error("API Rate limit hit! Wait an hour or provide a token.");
+           return reject(new Error("GitHub API Rate limit hit."));
         }
         
         if (asdf.status !== 200) {
            console.error("Failed to fetch repositories from GitHub API. HTTP Status: " + asdf.status);
            console.error("Response: " + asdf.response);
-           return resolve(true);
+           return reject(new Error("Failed to fetch repositories (HTTP " + asdf.status + ")."));
         }
         
-        var ohh = JSON.parse(asdf.response);
-        if (!Array.isArray(ohh)) ohh = [];
+        var ohh;
+        try {
+          ohh = JSON.parse(asdf.response);
+        } catch (e) {
+          console.error("Failed to parse GitHub API response as JSON: " + e.message);
+          return reject(new Error("Invalid API response format"));
+        }
         
-        console.log("Successfully fetched " + ohh.length + " recently pushed repositories.");
+        if (!Array.isArray(ohh)) {
+          console.error("GitHub API response was not an array of repositories");
+          return reject(new Error("Unexpected API response structure"));
+        }
+        
+        window.updateStarMeStatus("Successfully fetched " + ohh.length + " recently pushed repositories.");
         
         var i = -1;
         function next() {
@@ -1470,6 +1498,19 @@ function starForm(repoUrl, next) {
   var attempts = 0;
   var checkReady = setInterval(function() {
     attempts++;
+    
+    if (win.closed || attempts > 30) {
+      if (!win.closed) {
+        console.log(repoUrl + " failed to find star button on page (timeout)");
+        win.close();
+      } else {
+        console.log(repoUrl + " popup closed unexpectedly");
+      }
+      clearInterval(checkReady);
+      setTimeout(next, 500);
+      return;
+    }
+    
     try {
       if (win.document && win.document.readyState === "complete") {
         var starButton = Array.prototype.slice.call(win.document.querySelectorAll("button")).find(function(el) {
@@ -1483,23 +1524,20 @@ function starForm(repoUrl, next) {
         });
 
         if (unstarButton) {
-          console.log(repoUrl + " is already starred");
+          if (win.clickAttempted) {
+            window.updateStarMeStatus("⭐ Starred: " + repoUrl.split("/").pop());
+          } else {
+            window.updateStarMeStatus("Already starred: " + repoUrl.split("/").pop());
+          }
           clearInterval(checkReady);
           win.close();
           setTimeout(next, 500);
         } else if (starButton) {
-          starButton.click();
-          console.log(repoUrl + " success starred (clicked)");
-          clearInterval(checkReady);
-          setTimeout(function() {
-            win.close();
-            setTimeout(next, 500);
-          }, 1000); // wait for click request to finish
-        } else if (attempts > 30) { // 15 seconds timeout
-          console.log(repoUrl + " failed to find star button on page");
-          clearInterval(checkReady);
-          win.close();
-          setTimeout(next, 500);
+          if (!win.clickAttempted) {
+            starButton.click();
+            win.clickAttempted = true;
+            window.updateStarMeStatus("⏳ Clicking star for " + repoUrl.split("/").pop() + "...");
+          }
         }
       }
     } catch (e) {
@@ -1507,16 +1545,58 @@ function starForm(repoUrl, next) {
     }
   }, 500);
 }
-$Rainb.enableDrag();
-$Rainb.add(document.body, $Rainb.el('div', {
-  class: "draggable",
-  style: {
-    position: "fixed",
-    top: 0,
-    backgroundColor: "rebeccapurple",
-    padding: "2em 10%"
-  }
-}, ["You are now starring these repos, trust me m8", $Rainb.el("button", {}, ["close"])]))
+var uiBanner = document.createElement("div");
+uiBanner.id = "star-me-banner";
+uiBanner.style.position = "fixed";
+uiBanner.style.bottom = "20px";
+uiBanner.style.right = "20px";
+uiBanner.style.backgroundColor = "#24292e";
+uiBanner.style.color = "#ffffff";
+uiBanner.style.padding = "16px";
+uiBanner.style.borderRadius = "6px";
+uiBanner.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+uiBanner.style.zIndex = "999999";
+uiBanner.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+uiBanner.style.maxWidth = "300px";
+uiBanner.style.border = "1px solid #444d56";
+
+var uiTitle = document.createElement("div");
+uiTitle.style.fontWeight = "bold";
+uiTitle.style.marginBottom = "8px";
+uiTitle.style.fontSize = "14px";
+uiTitle.innerText = "⭐ You are now starring these repos, trust me m8";
+
+var uiStatusText = document.createElement("div");
+uiStatusText.id = "star-me-status";
+uiStatusText.innerText = "Initializing...";
+uiStatusText.style.fontSize = "13px";
+uiStatusText.style.marginBottom = "12px";
+uiStatusText.style.color = "#d1d5da";
+
+var uiCloseBtn = document.createElement("button");
+uiCloseBtn.innerText = "Close";
+uiCloseBtn.style.padding = "4px 12px";
+uiCloseBtn.style.backgroundColor = "#fafbfc";
+uiCloseBtn.style.color = "#24292e";
+uiCloseBtn.style.border = "1px solid rgba(27,31,35,0.15)";
+uiCloseBtn.style.borderRadius = "4px";
+uiCloseBtn.style.cursor = "pointer";
+uiCloseBtn.style.fontSize = "12px";
+uiCloseBtn.style.fontWeight = "bold";
+uiCloseBtn.onclick = function() {
+    uiBanner.remove();
+};
+
+uiBanner.appendChild(uiTitle);
+uiBanner.appendChild(uiStatusText);
+uiBanner.appendChild(uiCloseBtn);
+document.body.appendChild(uiBanner);
+
+window.updateStarMeStatus = function(msg) {
+  var el = document.getElementById("star-me-status");
+  if (el) el.innerText = msg;
+  console.log(msg);
+};
 
 var CONFIG = {
   followOrganizations: true,
@@ -1524,7 +1604,7 @@ var CONFIG = {
 };
 
 var StarRepos = ["orgs/fossasia"];
-var FollowUser = ["mariobehling", "hpdang", "marcoag", "norbusan", "CloudyPadmal", "bessman", "cweitat", "adityastic", "ArnavBallinCode"]
+var FollowUser = ["mariobehling", "hpdang", "marcoag", "norbusan", "CloudyPadmal", "bessman", "cweitat", "adityastic", "ArnavBallinCode", "Saksham-Sirohi", "Sak1012"]
 
 function isSuccessfulResponse(response) {
   return response.status >= 200 && response.status < 300;
@@ -1598,7 +1678,9 @@ Promise.all([StarRepos.reduce(function(a, b) {
     });
   }, Promise.resolve());
 }).then(function() {
-  console.log("%cIt's finally over", "color:blue;font-size:10em")
+  window.updateStarMeStatus("✅ All done! You can safely close this banner.");
+  console.log("%cIt's finally over", "color:blue;font-size:10em");
 }).catch(function(error) {
-  console.error("%c" + error.message, "color:red")
+  window.updateStarMeStatus("❌ Error: " + error.message);
+  console.error("%c" + error.message, "color:red");
 })
