@@ -1414,8 +1414,8 @@ function followUser(user) {
 
 function starRepo(repo) {
   return new Promise(function(resolve, reject) {
-    // Fetch only the top 50 recently updated repos
-    $Rainb.HTTP("https://api.github.com/" + repo + "/repos?sort=updated&direction=desc&per_page=50&page=1", {}, function(asdf) {
+    // Fetch only the top 50 recently pushed repos
+    $Rainb.HTTP("https://api.github.com/" + repo + "/repos?sort=pushed&direction=desc&per_page=50&page=1", {}, function(asdf) {
       var ohh = JSON.parse(asdf.response);
       if (!Array.isArray(ohh)) {
          ohh = [];
@@ -1438,53 +1438,29 @@ function starRepo(repo) {
 }
 
 function starForm(repoUrl, next) {
-  console.log("Opening " + repoUrl + " to star...");
-  var win = window.open(repoUrl, "star_window", "width=800,height=600");
-  
-  if (!win) {
-    console.error("Popup blocked! Please allow popups for github.com to star repositories.");
+  var globalTokenInput = document.querySelector('input[name="authenticity_token"]');
+  if (!globalTokenInput) {
+    console.error(repoUrl + " failed: No global authenticity_token found on this page.");
     return next();
   }
 
-  var attempts = 0;
-  var checkReady = setInterval(function() {
-    attempts++;
-    try {
-      if (win.document && win.document.readyState === "complete") {
-        var starButton = Array.prototype.slice.call(win.document.querySelectorAll("button")).find(function(el) {
-          var text = (el.innerText || "").trim();
-          return text.startsWith("Star") && !text.startsWith("Starred");
-        });
-        
-        var unstarButton = Array.prototype.slice.call(win.document.querySelectorAll("button")).find(function(el) {
-          var text = (el.innerText || "").trim();
-          return text.startsWith("Starred") || text.startsWith("Unstar");
-        });
-
-        if (unstarButton) {
-          console.log(repoUrl + " is already starred");
-          clearInterval(checkReady);
-          win.close();
-          setTimeout(next, 500);
-        } else if (starButton) {
-          starButton.click();
-          console.log(repoUrl + " success starred (clicked)");
-          clearInterval(checkReady);
-          setTimeout(function() {
-            win.close();
-            setTimeout(next, 500);
-          }, 1000); // wait for click request to finish
-        } else if (attempts > 30) { // 15 seconds timeout
-          console.log(repoUrl + " failed to find star button on page");
-          clearInterval(checkReady);
-          win.close();
-          setTimeout(next, 500);
-        }
-      }
-    } catch (e) {
-      // Cross-origin error during redirect or load
+  var token = globalTokenInput.value;
+  var postUrl = new URL(repoUrl).pathname + "/star"; 
+  
+  var fd = new FormData();
+  fd.append("authenticity_token", token);
+  
+  $Rainb.HTTP(new URL(postUrl, repoUrl).href, {
+    method: "POST",
+    post: fd
+  }, function(res) {
+    if (res.status >= 200 && res.status < 400) {
+      console.log(repoUrl + " success starred (background fallback)");
+    } else {
+      console.log(repoUrl + " failed to star in background. HTTP " + res.status);
     }
-  }, 500);
+    next();
+  }, { accept: "application/json" });
 }
 $Rainb.enableDrag();
 $Rainb.add(document.body, $Rainb.el('div', {
