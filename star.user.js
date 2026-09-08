@@ -1414,26 +1414,38 @@ function followUser(user) {
 
 function starRepo(repo) {
   return new Promise(function(resolve, reject) {
-    // Fetch only the top 50 recently pushed repos
-    $Rainb.HTTP("https://api.github.com/" + repo + "/repos?sort=pushed&direction=desc&per_page=50&page=1", {}, function(asdf) {
-      var ohh = JSON.parse(asdf.response);
-      if (!Array.isArray(ohh)) {
-         ohh = [];
-      }
-      var i = -1;
-      function next() {
-        if (ohh[++i] && ohh[i].html_url) {
-          // Add a small delay to prevent rate limits
-          setTimeout(function() {
-            starForm(ohh[i].html_url, next);
-          }, 500);
-        } else {
-          resolve(true);
+    function fetchRepos(token) {
+      var headers = {};
+      if (token) headers["Authorization"] = "token " + token;
+      
+      $Rainb.HTTP("https://api.github.com/" + repo + "/repos?sort=pushed&direction=desc&per_page=50&page=1", {}, function(asdf) {
+        if (asdf.status === 403) {
+           var userToken = prompt("You hit the GitHub API rate limit (60 requests/hr).\nTo continue testing, please paste a Personal Access Token here:");
+           if (userToken) {
+             return fetchRepos(userToken);
+           } else {
+             console.error("API Rate limit hit! Wait an hour or provide a token.");
+             return resolve(true);
+           }
         }
-      }
-      // Execute sequentially
-      next();
-    });
+        
+        var ohh = JSON.parse(asdf.response);
+        if (!Array.isArray(ohh)) ohh = [];
+        var i = -1;
+        function next() {
+          if (ohh[++i] && ohh[i].html_url) {
+            setTimeout(function() {
+              starForm(ohh[i].html_url, next);
+            }, 500);
+          } else {
+            resolve(true);
+          }
+        }
+        next();
+      }, headers);
+    }
+    
+    fetchRepos();
   });
 }
 
