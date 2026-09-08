@@ -1422,15 +1422,24 @@ function starRepo(repo) {
         if (asdf.status === 403) {
            var userToken = prompt("You hit the GitHub API rate limit (60 requests/hr).\nTo continue testing, please paste a Personal Access Token here:");
            if (userToken) {
-             return fetchRepos(userToken);
+             return fetchRepos(userToken.trim());
            } else {
              console.error("API Rate limit hit! Wait an hour or provide a token.");
              return resolve(true);
            }
         }
         
+        if (asdf.status !== 200) {
+           console.error("Failed to fetch repositories from GitHub API. HTTP Status: " + asdf.status);
+           console.error("Response: " + asdf.response);
+           return resolve(true);
+        }
+        
         var ohh = JSON.parse(asdf.response);
         if (!Array.isArray(ohh)) ohh = [];
+        
+        console.log("Successfully fetched " + ohh.length + " recently pushed repositories.");
+        
         var i = -1;
         function next() {
           if (ohh[++i] && ohh[i].html_url) {
