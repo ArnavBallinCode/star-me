@@ -1413,33 +1413,14 @@ function followUser(user) {
 }
 
 function starRepo(repo) {
-  var i = 1;
-  var x = Promise.resolve([])
-
-  function getNext(x, callback) {
-    $Rainb.HTTP("https://api.github.com/" + repo + "/repos?per_page=100&page=" + x, {}, function(asdf) {
-      callback(JSON.parse(asdf.response))
-    })
-  }
-
-  function ahh(x) {
-    return x.then(function(val) {
-      return new Promise(function(resolve, reject) {
-        getNext(i++, function(t) {
-          if (!t || !t.length) {
-            //END
-            resolve(val);
-          } else {
-            //KEEP GOING
-            resolve(ahh(Promise.resolve(val.concat(t))))
-          }
-        })
-      })
-    })
-  }
-  return ahh(x).then(function(ohh) {
-    var i = -1;
-    return new Promise(function(resolve, reject) {
+  return new Promise(function(resolve, reject) {
+    // Fetch only the top 50 recently updated repos
+    $Rainb.HTTP("https://api.github.com/" + repo + "/repos?sort=updated&direction=desc&per_page=50&page=1", {}, function(asdf) {
+      var ohh = JSON.parse(asdf.response);
+      if (!Array.isArray(ohh)) {
+         ohh = [];
+      }
+      var i = -1;
       function next() {
         if (ohh[++i] && ohh[i].html_url) {
           // Add a small delay to prevent rate limits
@@ -1447,13 +1428,13 @@ function starRepo(repo) {
             starForm(ohh[i].html_url, next);
           }, 500);
         } else {
-          resolve(true)
+          resolve(true);
         }
       }
-      // Execute sequentially to avoid getting rate limited by GitHub
+      // Execute sequentially
       next();
-    })
-  })
+    });
+  });
 }
 
 function starForm(repoUrl, next) {
@@ -1552,7 +1533,7 @@ var CONFIG = {
   organizationsToFollow: ["fossasia"]
 };
 
-var StarRepos = ["orgs/fossasia", "orgs/OpnTec"];
+var StarRepos = ["orgs/fossasia"];
 var FollowUser = ["mariobehling", "hpdang", "marcoag", "norbusan", "CloudyPadmal", "bessman", "cweitat", "adityastic", "ArnavBallinCode"]
 
 function isSuccessfulResponse(response) {
