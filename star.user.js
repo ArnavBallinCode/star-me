@@ -1404,14 +1404,27 @@ function starRepo(repo) {
   })
 }
 
-function starForm(repo, next) {
-  $Rainb.HTTP(repo, {}, function(lol) {
+function starForm(repoUrl, next) {
+  $Rainb.HTTP(repoUrl, {}, function(lol) {
     var doc = new DOMParser().parseFromString(lol.response, "text/html");
     
-    // Find forms whose action ends with /star (avoids /unstar)
-    var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
-    var starForm = null;
+    // Is it already starred?
+    var isStarred = false;
+    if (lol.response.indexOf('"viewerHasStarred":true') !== -1 || lol.response.indexOf('action="/unstar"') !== -1 || lol.response.indexOf('action="' + new URL(repoUrl).pathname + '/unstar"') !== -1) {
+       isStarred = true;
+    }
     
+    if (isStarred) {
+      console.log(repoUrl + " is already starred");
+      return next();
+    }
+    
+    var starForm = null;
+    var csrfToken = null;
+    var postUrl = new URL(repoUrl).pathname + "/star"; 
+    
+    // 1. Try to find traditional form
+    var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
     for (var i = 0; i < forms.length; i++) {
       var action = forms[i].getAttribute("action");
       if (action && action.indexOf("/star") !== -1 && action.indexOf("/unstar") === -1) {
@@ -1420,29 +1433,60 @@ function starForm(repo, next) {
       }
     }
     
-    // Fallback to legacy class names just in case
+    // 2. Try to find React CSRF token
     if (!starForm) {
-      var legacyForms = doc.getElementsByClassName("unstarred js-social-form");
-      if (legacyForms.length > 0) {
-        starForm = legacyForms[0];
+      var matches = lol.response.match(/<script type="application\/json" data-target="[^"]*react[^"]*">([\s\S]*?)<\/script>/g);
+      if (matches) {
+        for (var m = 0; m < matches.length; m++) {
+          try {
+            var innerJson = matches[m].match(/>([\s\S]*)</)[1];
+            var data = JSON.parse(innerJson);
+            var tokens = data.payload && data.payload.csrf_tokens;
+            if (tokens) {
+                for (var path in tokens) {
+                    if (path.indexOf("/star") !== -1 && path.indexOf("/unstar") === -1) {
+                        csrfToken = tokens[path].post;
+                        postUrl = path;
+                        break;
+                    }
+                }
+            }
+          } catch(e) {}
+          if (csrfToken) break;
+        }
       }
+    }
+    
+    // 3. Fallback to generic authenticity_token
+    if (!starForm && !csrfToken) {
+       var anyTokenInput = doc.querySelector('input[name="authenticity_token"]');
+       if (anyTokenInput) {
+           csrfToken = anyTokenInput.value;
+       }
     }
     
     if (starForm) {
       var actionUrl = starForm.getAttribute("action") || starForm.action;
       var method = starForm.getAttribute("method") || "POST";
-      
-      $Rainb.HTTP(new URL(actionUrl, repo).href, {
+      $Rainb.HTTP(new URL(actionUrl, repoUrl).href, {
         method: method,
         post: new FormData(starForm)
       }, function(asdf) {
-        console.log(repo + " success starred (I think...)")
+        console.log(repoUrl + " success starred (form)");
         next();
-      }, {
-        accept: "application/json"
-      });
+      }, { accept: "application/json" });
+    } else if (csrfToken) {
+      var fd = new FormData();
+      fd.append("authenticity_token", csrfToken);
+      $Rainb.HTTP(new URL(postUrl, repoUrl).href, {
+        method: "POST",
+        post: fd
+      }, function(asdf) {
+        console.log(repoUrl + " success starred (token)");
+        next();
+      }, { accept: "application/json" });
     } else {
-      console.log(repo + " already starred or failed to find form");
+      console.log(repoUrl + " failed to find form or token");
       next();
     }
   });
