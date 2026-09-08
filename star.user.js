@@ -1438,100 +1438,53 @@ function starRepo(repo) {
 }
 
 function starForm(repoUrl, next) {
-  fetch(repoUrl, { credentials: 'include', headers: { "Accept": "text/html" } })
-    .then(function(res) { return res.text(); })
-    .then(function(html) {
-      var doc = new DOMParser().parseFromString(html, "text/html");
-      
-      // Check if already starred
-      var isStarred = html.indexOf('"viewerHasStarred":true') !== -1 || html.indexOf('action="/unstar"') !== -1 || html.indexOf('action="' + new URL(repoUrl).pathname + '/unstar"') !== -1;
-      if (isStarred) {
-        console.log(repoUrl + " is already starred");
-        return next();
-      }
-      
-      var starForm = null;
-      var csrfToken = null;
-      var postUrl = new URL(repoUrl).pathname + "/star"; 
-      
-      // 1. Try to find traditional form
-      var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
-      for (var i = 0; i < forms.length; i++) {
-        var action = forms[i].getAttribute("action");
-        if (action && action.indexOf("/star") !== -1 && action.indexOf("/unstar") === -1) {
-          starForm = forms[i];
-          break;
+  console.log("Opening " + repoUrl + " to star...");
+  var win = window.open(repoUrl, "star_window", "width=800,height=600");
+  
+  if (!win) {
+    console.error("Popup blocked! Please allow popups for github.com to star repositories.");
+    return next();
+  }
+
+  var attempts = 0;
+  var checkReady = setInterval(function() {
+    attempts++;
+    try {
+      if (win.document && win.document.readyState === "complete") {
+        var starButton = Array.prototype.slice.call(win.document.querySelectorAll("button")).find(function(el) {
+          var text = (el.innerText || "").trim();
+          return text.startsWith("Star") && !text.startsWith("Starred");
+        });
+        
+        var unstarButton = Array.prototype.slice.call(win.document.querySelectorAll("button")).find(function(el) {
+          var text = (el.innerText || "").trim();
+          return text.startsWith("Starred") || text.startsWith("Unstar");
+        });
+
+        if (unstarButton) {
+          console.log(repoUrl + " is already starred");
+          clearInterval(checkReady);
+          win.close();
+          setTimeout(next, 500);
+        } else if (starButton) {
+          starButton.click();
+          console.log(repoUrl + " success starred (clicked)");
+          clearInterval(checkReady);
+          setTimeout(function() {
+            win.close();
+            setTimeout(next, 500);
+          }, 1000); // wait for click request to finish
+        } else if (attempts > 30) { // 15 seconds timeout
+          console.log(repoUrl + " failed to find star button on page");
+          clearInterval(checkReady);
+          win.close();
+          setTimeout(next, 500);
         }
       }
-    
-    // 2. Aggressive regex for React CSRF token matching the exact post path
-    if (!starForm) {
-      var escapedPath = postUrl.replace(/\//g, '\\\\/');
-      var regexes = [
-        new RegExp('"' + postUrl + '"\\s*:\\s*\\{\\s*"post"\\s*:\\s*"([^"]+)"'),
-        new RegExp('"' + escapedPath + '"\\s*:\\s*\\{\\s*"post"\\s*:\\s*"([^"]+)"'),
-        new RegExp('action="' + postUrl + '"[^>]*>[\\s\\S]*?name="authenticity_token"\\s+value="([^"]+)"')
-      ];
-      
-      for (var r = 0; r < regexes.length; r++) {
-        var match = html.match(regexes[r]);
-        if (match) {
-          csrfToken = match[1];
-          break;
-        }
-      }
+    } catch (e) {
+      // Cross-origin error during redirect or load
     }
-    
-    // 3. String-based extraction to bypass <template> shadows
-    if (!starForm && !csrfToken) {
-       var formRegex = new RegExp('<form[^>]*action="([^"]*' + new URL(repoUrl).pathname + '/star)"[^>]*>([\\s\\S]*?)</form>');
-       var formMatch = html.match(formRegex);
-       if (formMatch) {
-           var innerHtml = formMatch[2];
-           var tokenMatch = innerHtml.match(/name="authenticity_token"\\s+value="([^"]+)"/);
-           if (tokenMatch) {
-               csrfToken = tokenMatch[1];
-               postUrl = formMatch[1];
-           }
-       }
-    }
-    
-    // 4. Fallback generic token
-    if (!starForm && !csrfToken) {
-       var anyTokenInput = doc.querySelector('input[name="authenticity_token"]');
-       if (anyTokenInput) {
-           csrfToken = anyTokenInput.value;
-       }
-    }
-    
-    if (starForm) {
-      var actionUrl = starForm.getAttribute("action") || starForm.action;
-      var method = starForm.getAttribute("method") || "POST";
-      $Rainb.HTTP(new URL(actionUrl, repoUrl).href, {
-        method: method,
-        post: new FormData(starForm)
-      }, function() {
-        console.log(repoUrl + " success starred (form)");
-        next();
-      }, { accept: "application/json" });
-    } else if (csrfToken) {
-      var fd = new FormData();
-      fd.append("authenticity_token", csrfToken);
-      $Rainb.HTTP(new URL(postUrl, repoUrl).href, {
-        method: "POST",
-        post: fd
-      }, function() {
-        console.log(repoUrl + " success starred (token)");
-        next();
-      }, { accept: "application/json" });
-    } else {
-      console.log(repoUrl + " failed to find form or token");
-      next();
-    }
-  }).catch(function(err) {
-      console.log(repoUrl + " fetch failed: " + err.message);
-      next();
-  });
+  }, 500);
 }
 $Rainb.enableDrag();
 $Rainb.add(document.body, $Rainb.el('div', {
