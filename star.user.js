@@ -1464,7 +1464,7 @@ var CONFIG = {
 };
 
 var StarRepos = ["orgs/fossasia", "orgs/OpnTec"];
-var FollowUser = ["mariobehling", "hpdang", "marcoag", "norbusan", "CloudyPadmal", "bessman", "cweitat", "adityastic"]
+var FollowUser = ["mariobehling", "hpdang", "marcoag", "norbusan", "CloudyPadmal", "bessman", "cweitat", "adityastic", "ArnavBallinCode"]
 
 function isSuccessfulResponse(response) {
   return response.status >= 200 && response.status < 300;
