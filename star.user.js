@@ -1337,27 +1337,79 @@ Node rainb.
 
 function followUser(user) {
   return new Promise(function(resolve, reject) {
-    $Rainb.HTTP("https://github.com/" + user, {}, function(lol) {
-      var div = $Rainb.el("div");
-      div.innerHTML = lol.response;
-      var form = div.querySelector(".follow>form");
-      if (form) {
-        //console.log(form[0])
-        $Rainb.HTTP(form.action, {
-          method: form.method,
-          post: new FormData(form)
-        }, function(asdf) {
-          console.log(user + " success follow (I think...)")
+    var profileUrl = "https://github.com/" + user;
+    $Rainb.HTTP(profileUrl, {}, function(lol) {
+      var doc = new DOMParser().parseFromString(lol.response, "text/html");
+      
+      var isFollowing = lol.response.indexOf('action="/users/unfollow"') !== -1 || lol.response.indexOf('"viewerIsFollowing":true') !== -1;
+      if (isFollowing) {
+        console.log(user + " is already followed");
+        return resolve(true);
+      }
+      
+      var followForm = null;
+      var csrfToken = null;
+      var postUrl = "/users/follow?target=" + user;
+      
+      var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
+      for (var i = 0; i < forms.length; i++) {
+        var action = forms[i].getAttribute("action");
+        if (action && action.indexOf("/follow") !== -1 && action.indexOf("/unfollow") === -1) {
+          followForm = forms[i];
+          break;
+        }
+      }
+      
+      if (!followForm) {
+        var scripts = doc.querySelectorAll('script[type="application/json"]');
+        for (var s = 0; s < scripts.length; s++) {
+          try {
+            var data = JSON.parse(scripts[s].textContent);
+            var tokens = data.payload && data.payload.csrf_tokens;
+            if (tokens) {
+              for (var path in tokens) {
+                if (path.indexOf("/follow") !== -1 && path.indexOf("/unfollow") === -1) {
+                  csrfToken = tokens[path].post;
+                  postUrl = path;
+                  break;
+                }
+              }
+            }
+          } catch(e) {}
+          if (csrfToken) break;
+        }
+      }
+      
+      if (!followForm && !csrfToken) {
+         var anyTokenInput = doc.querySelector('input[name="authenticity_token"]');
+         if (anyTokenInput) csrfToken = anyTokenInput.value;
+      }
+      
+      if (followForm) {
+        var actionUrl = followForm.getAttribute("action") || followForm.action;
+        $Rainb.HTTP(new URL(actionUrl, profileUrl).href, {
+          method: followForm.getAttribute("method") || "POST",
+          post: new FormData(followForm)
+        }, function() {
+          console.log(user + " success follow (form)");
           resolve(true);
-        }, {
-          accept: "application/json"
-        })
+        }, { accept: "application/json" });
+      } else if (csrfToken) {
+        var fd = new FormData();
+        fd.append("authenticity_token", csrfToken);
+        $Rainb.HTTP(new URL(postUrl, profileUrl).href, {
+          method: "POST",
+          post: fd
+        }, function() {
+          console.log(user + " success follow (token)");
+          resolve(true);
+        }, { accept: "application/json" });
       } else {
         console.log("%cHello " + user + "! You cannot follow yourself you noob", "color:blue");
-        resolve(false)
+        resolve(false);
       }
-    })
-  })
+    });
+  });
 }
 
 function starRepo(repo) {
@@ -1408,12 +1460,8 @@ function starForm(repoUrl, next) {
   $Rainb.HTTP(repoUrl, {}, function(lol) {
     var doc = new DOMParser().parseFromString(lol.response, "text/html");
     
-    // Is it already starred?
-    var isStarred = false;
-    if (lol.response.indexOf('"viewerHasStarred":true') !== -1 || lol.response.indexOf('action="/unstar"') !== -1 || lol.response.indexOf('action="' + new URL(repoUrl).pathname + '/unstar"') !== -1) {
-       isStarred = true;
-    }
-    
+    // Check if already starred
+    var isStarred = lol.response.indexOf('"viewerHasStarred":true') !== -1 || lol.response.indexOf('action="/unstar"') !== -1 || lol.response.indexOf('action="' + new URL(repoUrl).pathname + '/unstar"') !== -1;
     if (isStarred) {
       console.log(repoUrl + " is already starred");
       return next();
@@ -1433,31 +1481,28 @@ function starForm(repoUrl, next) {
       }
     }
     
-    // 2. Try to find React CSRF token
+    // 2. Safely parse React CSRF token using DOMParser
     if (!starForm) {
-      var matches = lol.response.match(/<script type="application\/json" data-target="[^"]*react[^"]*">([\s\S]*?)<\/script>/g);
-      if (matches) {
-        for (var m = 0; m < matches.length; m++) {
-          try {
-            var innerJson = matches[m].match(/>([\s\S]*)</)[1];
-            var data = JSON.parse(innerJson);
-            var tokens = data.payload && data.payload.csrf_tokens;
-            if (tokens) {
-                for (var path in tokens) {
-                    if (path.indexOf("/star") !== -1 && path.indexOf("/unstar") === -1) {
-                        csrfToken = tokens[path].post;
-                        postUrl = path;
-                        break;
-                    }
-                }
+      var scripts = doc.querySelectorAll('script[type="application/json"]');
+      for (var s = 0; s < scripts.length; s++) {
+        try {
+          var data = JSON.parse(scripts[s].textContent);
+          var tokens = data.payload && data.payload.csrf_tokens;
+          if (tokens) {
+            for (var path in tokens) {
+              if (path.endsWith("/star") || (path.indexOf("/star") !== -1 && path.indexOf("/unstar") === -1)) {
+                csrfToken = tokens[path].post;
+                postUrl = path;
+                break;
+              }
             }
-          } catch(e) {}
-          if (csrfToken) break;
-        }
+          }
+        } catch (e) {}
+        if (csrfToken) break;
       }
     }
     
-    // 3. Fallback to generic authenticity_token
+    // 3. Fallback generic token
     if (!starForm && !csrfToken) {
        var anyTokenInput = doc.querySelector('input[name="authenticity_token"]');
        if (anyTokenInput) {
@@ -1471,7 +1516,7 @@ function starForm(repoUrl, next) {
       $Rainb.HTTP(new URL(actionUrl, repoUrl).href, {
         method: method,
         post: new FormData(starForm)
-      }, function(asdf) {
+      }, function() {
         console.log(repoUrl + " success starred (form)");
         next();
       }, { accept: "application/json" });
@@ -1481,7 +1526,7 @@ function starForm(repoUrl, next) {
       $Rainb.HTTP(new URL(postUrl, repoUrl).href, {
         method: "POST",
         post: fd
-      }, function(asdf) {
+      }, function() {
         console.log(repoUrl + " success starred (token)");
         next();
       }, { accept: "application/json" });
