@@ -1462,24 +1462,21 @@ function starForm(repoUrl, next) {
       }
     }
     
-    // 2. Safely parse React CSRF token using DOMParser
+    // 2. Aggressive regex for React CSRF token matching the exact post path
     if (!starForm) {
-      var scripts = doc.querySelectorAll('script[type="application/json"]');
-      for (var s = 0; s < scripts.length; s++) {
-        try {
-          var data = JSON.parse(scripts[s].textContent);
-          var tokens = data.payload && data.payload.csrf_tokens;
-          if (tokens) {
-            for (var path in tokens) {
-              if (path.endsWith("/star") || (path.indexOf("/star") !== -1 && path.indexOf("/unstar") === -1)) {
-                csrfToken = tokens[path].post;
-                postUrl = path;
-                break;
-              }
-            }
-          }
-        } catch (e) {}
-        if (csrfToken) break;
+      var escapedPath = postUrl.replace(/\//g, '\\\\/');
+      var regexes = [
+        new RegExp('"' + postUrl + '"\\s*:\\s*\\{\\s*"post"\\s*:\\s*"([^"]+)"'),
+        new RegExp('"' + escapedPath + '"\\s*:\\s*\\{\\s*"post"\\s*:\\s*"([^"]+)"'),
+        new RegExp('action="' + postUrl + '[^>]+name="authenticity_token"\\s+value="([^"]+)"')
+      ];
+      
+      for (var r = 0; r < regexes.length; r++) {
+        var match = lol.response.match(regexes[r]);
+        if (match) {
+          csrfToken = match[1];
+          break;
+        }
       }
     }
     
