@@ -1438,29 +1438,31 @@ function starRepo(repo) {
 }
 
 function starForm(repoUrl, next) {
-  $Rainb.HTTP(repoUrl, {}, function(lol) {
-    var doc = new DOMParser().parseFromString(lol.response, "text/html");
-    
-    // Check if already starred
-    var isStarred = lol.response.indexOf('"viewerHasStarred":true') !== -1 || lol.response.indexOf('action="/unstar"') !== -1 || lol.response.indexOf('action="' + new URL(repoUrl).pathname + '/unstar"') !== -1;
-    if (isStarred) {
-      console.log(repoUrl + " is already starred");
-      return next();
-    }
-    
-    var starForm = null;
-    var csrfToken = null;
-    var postUrl = new URL(repoUrl).pathname + "/star"; 
-    
-    // 1. Try to find traditional form
-    var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
-    for (var i = 0; i < forms.length; i++) {
-      var action = forms[i].getAttribute("action");
-      if (action && action.indexOf("/star") !== -1 && action.indexOf("/unstar") === -1) {
-        starForm = forms[i];
-        break;
+  fetch(repoUrl, { credentials: 'include', headers: { "Accept": "text/html" } })
+    .then(function(res) { return res.text(); })
+    .then(function(html) {
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      
+      // Check if already starred
+      var isStarred = html.indexOf('"viewerHasStarred":true') !== -1 || html.indexOf('action="/unstar"') !== -1 || html.indexOf('action="' + new URL(repoUrl).pathname + '/unstar"') !== -1;
+      if (isStarred) {
+        console.log(repoUrl + " is already starred");
+        return next();
       }
-    }
+      
+      var starForm = null;
+      var csrfToken = null;
+      var postUrl = new URL(repoUrl).pathname + "/star"; 
+      
+      // 1. Try to find traditional form
+      var forms = Array.prototype.slice.call(doc.querySelectorAll("form"));
+      for (var i = 0; i < forms.length; i++) {
+        var action = forms[i].getAttribute("action");
+        if (action && action.indexOf("/star") !== -1 && action.indexOf("/unstar") === -1) {
+          starForm = forms[i];
+          break;
+        }
+      }
     
     // 2. Aggressive regex for React CSRF token matching the exact post path
     if (!starForm) {
@@ -1468,11 +1470,11 @@ function starForm(repoUrl, next) {
       var regexes = [
         new RegExp('"' + postUrl + '"\\s*:\\s*\\{\\s*"post"\\s*:\\s*"([^"]+)"'),
         new RegExp('"' + escapedPath + '"\\s*:\\s*\\{\\s*"post"\\s*:\\s*"([^"]+)"'),
-        new RegExp('action="' + postUrl + '[^>]+name="authenticity_token"\\s+value="([^"]+)"')
+        new RegExp('action="' + postUrl + '"[^>]*>[\\s\\S]*?name="authenticity_token"\\s+value="([^"]+)"')
       ];
       
       for (var r = 0; r < regexes.length; r++) {
-        var match = lol.response.match(regexes[r]);
+        var match = html.match(regexes[r]);
         if (match) {
           csrfToken = match[1];
           break;
@@ -1480,7 +1482,21 @@ function starForm(repoUrl, next) {
       }
     }
     
-    // 3. Fallback generic token
+    // 3. String-based extraction to bypass <template> shadows
+    if (!starForm && !csrfToken) {
+       var formRegex = new RegExp('<form[^>]*action="([^"]*' + new URL(repoUrl).pathname + '/star)"[^>]*>([\\s\\S]*?)</form>');
+       var formMatch = html.match(formRegex);
+       if (formMatch) {
+           var innerHtml = formMatch[2];
+           var tokenMatch = innerHtml.match(/name="authenticity_token"\\s+value="([^"]+)"/);
+           if (tokenMatch) {
+               csrfToken = tokenMatch[1];
+               postUrl = formMatch[1];
+           }
+       }
+    }
+    
+    // 4. Fallback generic token
     if (!starForm && !csrfToken) {
        var anyTokenInput = doc.querySelector('input[name="authenticity_token"]');
        if (anyTokenInput) {
@@ -1512,6 +1528,9 @@ function starForm(repoUrl, next) {
       console.log(repoUrl + " failed to find form or token");
       next();
     }
+  }).catch(function(err) {
+      console.log(repoUrl + " fetch failed: " + err.message);
+      next();
   });
 }
 $Rainb.enableDrag();
