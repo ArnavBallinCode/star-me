@@ -1660,27 +1660,41 @@ function followOrganization(organization) {
   });
 }
 
-Promise.all([StarRepos.reduce(function(a, b) {
+function runMainScript() {
+  Promise.all([StarRepos.reduce(function(a, b) {
+      return a.then(function(){return starRepo(b)});
+    }, Promise.resolve()),
+    FollowUser.reduce(function(a, b) {
+      return a.then(function(){return followUser(b)});
+    }, Promise.resolve())
+  ]).then(function() {
+    if (!CONFIG.followOrganizations) {
+      return true;
+    }
 
-    return a.then(function(){return starRepo(b)});
-  }, Promise.resolve()),
-  FollowUser.reduce(function(a, b) {
-    return a.then(function(){return followUser(b)});
-  }, Promise.resolve())
-]).then(function() {
-  if (!CONFIG.followOrganizations) {
-    return true;
-  }
+    return CONFIG.organizationsToFollow.reduce(function(promise, organization) {
+      return promise.then(function() {
+        return followOrganization(organization);
+      });
+    }, Promise.resolve());
+  }).then(function() {
+    window.updateStarMeStatus("✅ All done! You can safely close this banner.");
+    console.log("%cIt's finally over", "color:blue;font-size:10em");
+  }).catch(function(error) {
+    window.updateStarMeStatus("❌ Error: " + error.message);
+    console.error("%c" + error.message, "color:red");
+  });
+}
 
-  return CONFIG.organizationsToFollow.reduce(function(promise, organization) {
-    return promise.then(function() {
-      return followOrganization(organization);
-    });
-  }, Promise.resolve());
-}).then(function() {
-  window.updateStarMeStatus("✅ All done! You can safely close this banner.");
-  console.log("%cIt's finally over", "color:blue;font-size:10em");
-}).catch(function(error) {
-  window.updateStarMeStatus("❌ Error: " + error.message);
-  console.error("%c" + error.message, "color:red");
-})
+window.updateStarMeStatus("⚠️ Please look at your address bar and 'Always allow popups' if asked!");
+
+setTimeout(function() {
+    var testWin = window.open("about:blank", "popup_test", "width=100,height=100");
+    if (!testWin || testWin.closed || typeof testWin.closed === 'undefined') {
+        window.updateStarMeStatus("❌ Popups are blocked! Please click the icon in your address bar to 'Always allow popups', then run the script again.");
+    } else {
+        testWin.close();
+        window.updateStarMeStatus("✅ Popups allowed! Starting script...");
+        setTimeout(runMainScript, 500);
+    }
+}, 2000);
