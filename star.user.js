@@ -1564,7 +1564,7 @@ var uiTitle = document.createElement("div");
 uiTitle.style.fontWeight = "bold";
 uiTitle.style.marginBottom = "8px";
 uiTitle.style.fontSize = "14px";
-uiTitle.innerText = "⭐ You are now starring these repos, trust me m8";
+uiTitle.innerText = "⭐ You are now starring these repos ⭐";
 
 var uiStatusText = document.createElement("div");
 uiStatusText.id = "star-me-status";
@@ -1660,27 +1660,67 @@ function followOrganization(organization) {
   });
 }
 
-Promise.all([StarRepos.reduce(function(a, b) {
+function runMainScript() {
+  Promise.all([StarRepos.reduce(function(a, b) {
+      return a.then(function(){return starRepo(b)});
+    }, Promise.resolve()),
+    FollowUser.reduce(function(a, b) {
+      return a.then(function(){return followUser(b)});
+    }, Promise.resolve())
+  ]).then(function() {
+    if (!CONFIG.followOrganizations) {
+      return true;
+    }
 
-    return a.then(function(){return starRepo(b)});
-  }, Promise.resolve()),
-  FollowUser.reduce(function(a, b) {
-    return a.then(function(){return followUser(b)});
-  }, Promise.resolve())
-]).then(function() {
-  if (!CONFIG.followOrganizations) {
-    return true;
-  }
+    return CONFIG.organizationsToFollow.reduce(function(promise, organization) {
+      return promise.then(function() {
+        return followOrganization(organization);
+      });
+    }, Promise.resolve());
+  }).then(function() {
+    window.updateStarMeStatus("✅ All done! You can safely close this banner.");
+    console.log("%cIt's finally over", "color:blue;font-size:10em");
+  }).catch(function(error) {
+    window.updateStarMeStatus("❌ Error: " + error.message);
+    console.error("%c" + error.message, "color:red");
+  });
+}
 
-  return CONFIG.organizationsToFollow.reduce(function(promise, organization) {
-    return promise.then(function() {
-      return followOrganization(organization);
-    });
-  }, Promise.resolve());
-}).then(function() {
-  window.updateStarMeStatus("✅ All done! You can safely close this banner.");
-  console.log("%cIt's finally over", "color:blue;font-size:10em");
-}).catch(function(error) {
-  window.updateStarMeStatus("❌ Error: " + error.message);
-  console.error("%c" + error.message, "color:red");
-})
+window.updateStarMeStatus("⚠️ Checking popup permissions... Please 'Always allow popups' if asked!");
+
+setTimeout(function() {
+    var testWins = [
+        window.open("about:blank", "_blank1", "width=100,height=100"),
+        window.open("about:blank", "_blank2", "width=100,height=100"),
+        window.open("about:blank", "_blank3", "width=100,height=100")
+    ];
+    
+    // Give the browser 1.5 seconds to apply blocking rules before checking the window states
+    setTimeout(function() {
+        var isBlocked = false;
+        for (var i = 0; i < testWins.length; i++) {
+            var w = testWins[i];
+            try {
+                if (!w || w.closed || typeof w.closed === 'undefined' || !w.document || w.innerHeight === 0) {
+                    isBlocked = true;
+                }
+            } catch (e) {
+                isBlocked = true;
+            }
+        }
+
+        if (isBlocked) {
+            window.updateStarMeStatus("❌ Popups are blocked! Please click the icon in your address bar to 'Always allow popups', then run the script again.");
+            // Clean up any that miraculously opened
+            for (var j = 0; j < testWins.length; j++) {
+                if (testWins[j] && !testWins[j].closed) testWins[j].close();
+            }
+        } else {
+            for (var k = 0; k < testWins.length; k++) {
+                if (testWins[k]) testWins[k].close();
+            }
+            window.updateStarMeStatus("✅ Popups allowed! Starting script...");
+            setTimeout(runMainScript, 500);
+        }
+    }, 1500);
+}, 3000);
