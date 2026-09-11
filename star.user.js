@@ -1691,11 +1691,11 @@ window.updateStarMeStatus("⚠️ Checking popup permissions... Please 'Always a
 setTimeout(function() {
     var testWin = window.open("about:blank", "_blank", "width=100,height=100");
     
-    // Give the browser a moment to apply blocking rules before checking the window state
+    // Give the browser 1.5 seconds to apply blocking rules before checking the window state
     setTimeout(function() {
         var isBlocked = false;
         try {
-            if (!testWin || testWin.closed || typeof testWin.closed === 'undefined' || testWin.innerHeight === 0) {
+            if (!testWin || testWin.closed || typeof testWin.closed === 'undefined' || !testWin.document || testWin.innerHeight === 0) {
                 isBlocked = true;
             }
         } catch (e) {
@@ -1709,5 +1709,5 @@ setTimeout(function() {
             window.updateStarMeStatus("✅ Popups allowed! Starting script...");
             setTimeout(runMainScript, 500);
         }
-    }, 250);
+    }, 1500);
 }, 3000);
