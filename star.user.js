@@ -1689,7 +1689,7 @@ function runMainScript() {
 window.updateStarMeStatus("⚠️ Please look at your address bar and 'Always allow popups' if asked!");
 
 setTimeout(function() {
-    var testWin = window.open("about:blank", "popup_test", "width=100,height=100");
+    var testWin = window.open("about:blank", "_blank", "width=100,height=100");
     if (!testWin || testWin.closed || typeof testWin.closed === 'undefined') {
         window.updateStarMeStatus("❌ Popups are blocked! Please click the icon in your address bar to 'Always allow popups', then run the script again.");
     } else {
