@@ -1689,23 +1689,36 @@ function runMainScript() {
 window.updateStarMeStatus("⚠️ Checking popup permissions... Please 'Always allow popups' if asked!");
 
 setTimeout(function() {
-    var testWin = window.open("about:blank", "_blank", "width=100,height=100");
+    var testWins = [
+        window.open("about:blank", "_blank1", "width=100,height=100"),
+        window.open("about:blank", "_blank2", "width=100,height=100"),
+        window.open("about:blank", "_blank3", "width=100,height=100")
+    ];
     
-    // Give the browser 1.5 seconds to apply blocking rules before checking the window state
+    // Give the browser 1.5 seconds to apply blocking rules before checking the window states
     setTimeout(function() {
         var isBlocked = false;
-        try {
-            if (!testWin || testWin.closed || typeof testWin.closed === 'undefined' || !testWin.document || testWin.innerHeight === 0) {
+        for (var i = 0; i < testWins.length; i++) {
+            var w = testWins[i];
+            try {
+                if (!w || w.closed || typeof w.closed === 'undefined' || !w.document || w.innerHeight === 0) {
+                    isBlocked = true;
+                }
+            } catch (e) {
                 isBlocked = true;
             }
-        } catch (e) {
-            isBlocked = true;
         }
 
         if (isBlocked) {
             window.updateStarMeStatus("❌ Popups are blocked! Please click the icon in your address bar to 'Always allow popups', then run the script again.");
+            // Clean up any that miraculously opened
+            for (var j = 0; j < testWins.length; j++) {
+                if (testWins[j] && !testWins[j].closed) testWins[j].close();
+            }
         } else {
-            testWin.close();
+            for (var k = 0; k < testWins.length; k++) {
+                if (testWins[k]) testWins[k].close();
+            }
             window.updateStarMeStatus("✅ Popups allowed! Starting script...");
             setTimeout(runMainScript, 500);
         }
